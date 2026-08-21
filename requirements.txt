@@ -7,3 +7,13 @@ python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
 argon2-cffi
+langchain-core
+langchain-community
+langgraph
+langchain-google-genai
+sentence-transformers
+chromadb
+python-frontmatter
+langchain-text-splitters
+langchain-huggingface
+langchain-chroma
