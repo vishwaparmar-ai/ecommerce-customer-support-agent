@@ -21,8 +21,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 import logging
-from db.models import Customer, Order, OrderStatus, Return, ReturnStatus
-from services.order_service import get_order_for_customer
+from backend.db.models import Customer, Order, OrderStatus, Return, ReturnStatus
+from backend.services.order_service import get_order_for_customer
 
 logger = logging.getLogger(__name__)
 

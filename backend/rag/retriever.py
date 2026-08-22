@@ -82,15 +82,15 @@ def retrieve_policy_chunks(query: str, k: int = DEFAULT_TOP_K) -> list[dict]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Manual test
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    test_query = "What is the return window for electronics?"
-    chunks = retrieve_policy_chunks(test_query)
+# # ---------------------------------------------------------------------------
+# # Manual test
+# # ---------------------------------------------------------------------------
+# if __name__ == "__main__":
+#     test_query = "What is the return window for electronics?"
+#     chunks = retrieve_policy_chunks(test_query)
 
-    print(f"\nQuery: {test_query}\n")
-    for i, chunk in enumerate(chunks, start=1):
-        print(f"--- Result {i} ({chunk['document_type']} / {chunk['section']}) ---")
-        print(chunk["content"])
-        print()
+#     print(f"\nQuery: {test_query}\n")
+#     for i, chunk in enumerate(chunks, start=1):
+#         print(f"--- Result {i} ({chunk['document_type']} / {chunk['section']}) ---")
+#         print(chunk["content"])
+#         print()

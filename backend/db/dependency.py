@@ -1,9 +1,9 @@
-from db.session import SessionLocal
+from backend.db.session import SessionLocal
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from db.models import Customer
-from core.security import verify_jwt_token
+from backend.db.models import Customer
+from backend.core.security import verify_jwt_token
 from uuid import UUID
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")

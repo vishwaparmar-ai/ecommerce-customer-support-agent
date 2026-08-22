@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from db.models import TicketPriority, TicketStatus
+from backend.db.models import TicketPriority, TicketStatus
 from uuid import UUID
 
 class TicketCreate(BaseModel):

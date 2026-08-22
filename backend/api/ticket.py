@@ -19,10 +19,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
-from db.models import Customer
-from db.dependency import get_db, get_current_user
-from schemas.support import TicketAssign,TicketCreate,TicketStatusUpdate
-from services.support_service import (
+from backend.db.models import Customer
+from backend.db.dependency import get_db, get_current_user
+from backend.schemas.support import TicketAssign,TicketCreate,TicketStatusUpdate
+from backend.services.support_service import (
     create_ticket
 )
 

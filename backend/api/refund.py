@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from db.dependency import get_db, get_current_user
-from db.models import Customer
-from schemas.refunds import OrderRefund
-from services.refund_service import process_refund
+from backend.db.dependency import get_db, get_current_user
+from backend.db.models import Customer
+from backend.schemas.refunds import OrderRefund
+from backend.services.refund_service import process_refund
 
 
 router = APIRouter(

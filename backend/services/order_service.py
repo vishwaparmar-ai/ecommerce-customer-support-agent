@@ -4,8 +4,8 @@
 """
 
 from __future__ import annotations
-from schemas.orders import OrderItem,OrderCreate
-from db.models import Order
+from backend.schemas.orders import OrderItem,OrderCreate
+from backend.db.models import Order
 from fastapi import HTTPException,status
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -17,7 +17,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 
-from db.models import (
+from backend.db.models import (
     Customer,
     Order,
     OrderItem,

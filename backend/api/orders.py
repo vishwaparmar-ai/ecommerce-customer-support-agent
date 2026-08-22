@@ -3,14 +3,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from db.dependency import get_db
-from db.models import Customer
-from schemas.orders import OrderCreate
-from services.order_service import (
+from backend.db.dependency import get_db
+from backend.db.models import Customer
+from backend.schemas.orders import OrderCreate
+from backend.services.order_service import (
     create_order,
     cancel_order,
 )
-from db.dependency import get_current_user
+from backend.db.dependency import get_current_user
 
 
 router = APIRouter(

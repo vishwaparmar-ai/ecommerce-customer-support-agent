@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from uuid import UUID
-from db.models import PaymentMethod
+from backend.db.models import PaymentMethod
 
 class OrderItem(BaseModel):
     product_id:UUID

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from jose import jwt
 from passlib.context import CryptContext
-from core.config import settings
+from backend.core.config import settings
 from fastapi import HTTPException,status
 from jose import JWTError, jwt
 
