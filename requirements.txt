@@ -17,3 +17,5 @@ python-frontmatter
 langchain-text-splitters
 langchain-huggingface
 langchain-chroma
+psycopg[binary]
+psycopg-pool

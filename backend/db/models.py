@@ -42,10 +42,85 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID,JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db.database import Base
 
+
+class ConversationStatus(str, enum.Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"  # awaiting an interrupt()/approval confirmation
+    COMPLETED = "completed"
+ 
+ 
+class Conversation(Base):
+    __tablename__ = "conversations"
+ 
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[ConversationStatus] = mapped_column(
+        Enum(ConversationStatus, name="conversation_status"),
+        default=ConversationStatus.ACTIVE,
+        nullable=False,
+    )
+    # Populated once a conversation gets long enough that older turns are
+    # compressed instead of being resent in full every time -- see
+    # summarization logic (built separately from this model).
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+ 
+    customer: Mapped["Customer"] = relationship(back_populates="conversations")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at"
+    )
+ 
+    def __repr__(self) -> str:
+        return f"<Conversation id={self.id} customer_id={self.customer_id} status={self.status}>"
+ 
+ 
+# ---------------------------------------------------------------------------
+# Message
+# ---------------------------------------------------------------------------
+class MessageRole(str, enum.Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+    TOOL = "tool"
+ 
+ 
+class Message(Base):
+    __tablename__ = "messages"
+ 
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole, name="message_role"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+ 
+    # See the module docstring's gotcha note: Python attribute is `meta`,
+    # actual Postgres column name is "metadata" (matching the doc's schema).
+    # Use this to store things like: intent classified, tool_calls trace,
+    # retrieved_context sources -- structured extras that don't belong in
+    # plain message content but are useful for debugging/audit later.
+    meta: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+ 
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+ 
+    conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+ 
+    def __repr__(self) -> str:
+        return f"<Message id={self.id} role={self.role} conversation_id={self.conversation_id}>"
+ 
 
 
 
@@ -62,6 +137,9 @@ class Customer(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    conversations:Mapped[list["Conversation"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

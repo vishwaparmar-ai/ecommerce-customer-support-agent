@@ -2,30 +2,35 @@
 Graph builder -- wires together everything built so far into an actual
 compiled LangGraph, for real end-to-end testing.
 
-Now includes a real checkpointer (InMemorySaver), required for
-cancellation_node's interrupt()/Command(resume=...) approval gate --
-without a checkpointer there is no saved state to pause and resume from.
-This also happens to be an early, minimal version of what Phase 6 (memory)
-formally builds: conversation state persisted across turns, keyed by
-thread_id, instead of your own hand-rolled history tracking.
+CHECKPOINTER: now backed by Postgres (langgraph-checkpoint-postgres),
+replacing the earlier InMemorySaver. This is the Phase 6 upgrade --
+conversation/interrupt state now survives a server restart, since it's
+stored in the same Postgres database as everything else, not this
+process's RAM.
 
-IMPORTANT: _checkpointer is a MODULE-LEVEL singleton, not created fresh
-inside build_graph(). InMemorySaver only holds state in this process's
-memory -- if you created a new one on every build_graph() call, a paused
-conversation's state would vanish the instant the next request rebuilt
-the graph, breaking resume entirely. Same limitation as the in-memory
-conversations dict from before: lost on server restart, not safe across
-multiple worker processes. Replace with a real persisted checkpointer
-(e.g. a Postgres-backed one) when this goes beyond local testing.
+Install: pip install langgraph-checkpoint-postgres
+Security: set LANGGRAPH_STRICT_MSGPACK=true in your .env -- this
+restricts checkpoint deserialization to known-safe types, which matters
+if your database were ever compromised (per the library's own docs).
+
+_checkpointer is still a MODULE-LEVEL singleton, same reasoning as
+before: a fresh connection/setup on every build_graph() call would be
+wasteful (and .setup() should only need to run once per process, not
+per request). This holds ONE persistent psycopg connection for the life
+of the process -- fine for local dev and testing, but production should
+use a connection pool (psycopg_pool.ConnectionPool) instead of a single
+bare connection, and ideally tie setup/teardown to FastAPI's lifespan
+events rather than running at import time.
 """
 
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import StateGraph, START, END
 from sqlalchemy.orm import Session
 
+from backend.core.config import settings
 from backend.core.logging import logger
 from backend.db.models import Customer
 from backend.agents.graph.state import AgentState
@@ -39,7 +44,17 @@ from backend.agents.graph.nodes.escalation_node import make_escalation_node
 from backend.agents.graph.nodes.cancellation_node import make_cancellation_node
 from backend.agents.graph.nodes.response_validator_node import response_validator_node
 
-_checkpointer = InMemorySaver()
+# PostgresSaver.from_conn_string() expects a plain libpq-style URI
+# ("postgresql://..."), not SQLAlchemy's dialect+driver style
+# ("postgresql+psycopg://..."). Strip the driver suffix.
+_CHECKPOINTER_DB_URI = settings.DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+
+# .from_conn_string() is a context manager; entering it here and never
+# exiting keeps one connection open for the process lifetime -- see the
+# module docstring's production caveat about using a real pool instead.
+_checkpointer_cm = PostgresSaver.from_conn_string(_CHECKPOINTER_DB_URI)
+_checkpointer = _checkpointer_cm.__enter__()
+_checkpointer.setup()  # idempotent: creates checkpoint tables if they don't exist yet
 
 
 def _not_implemented_node(state: AgentState) -> dict:

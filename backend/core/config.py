@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     DATABASE_URL:str
     GEMINI_API_KEY:str
+    LANGGRAPH_STRICT_MSGPACK:str
 
     class Config:
         env_file = ".env"
