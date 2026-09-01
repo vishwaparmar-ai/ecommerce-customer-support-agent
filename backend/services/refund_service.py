@@ -6,9 +6,13 @@ Encapsulates refund validation and creation so routers stay thin:
       actually collected, and no refund already exists, then creates the
       Refund and marks the payment as refunded.
 
-Reuses get_order_for_customer's ownership pattern by checking the Return's
-customer_id directly, since refunds are requested against a Return rather
-than an Order.
+PHASE 7 UPDATE: this is now a staff/admin-executed action (see refund.py
+router's require_role gate), not a customer's own action -- the ownership
+check comparing ret.customer_id to the caller's id no longer applies,
+since the caller is staff acting on a customer's return, not the customer
+themselves. `actor` replaces the old `current_user` param name to make
+that distinction explicit; logging now records both the staff actor and
+the customer who owns the refund, since they're different people.
 """
 
 from __future__ import annotations
@@ -18,7 +22,8 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-import logging
+
+from backend.core.logging import logger
 from backend.db.models import (
     Customer,
     PaymentStatus,
@@ -28,16 +33,19 @@ from backend.db.models import (
     ReturnStatus,
 )
 
-logger = logging.getLogger(__name__)
 
-
-def process_refund(db: Session, current_user: Customer, return_id: uuid.UUID) -> Refund:
+def process_refund(db: Session, actor: Customer, return_id: uuid.UUID) -> Refund:
     """
     Validates, in order, then creates the Refund:
-        1. Return exists and belongs to the current customer.
+        1. Return exists.
         2. Return is COMPLETED (item received back and accepted).
         3. Order's payment exists and was actually PAID.
         4. No refund already exists for this return.
+
+    `actor` is the staff/admin member executing this refund (authorization
+    for that is enforced at the router level via require_role) -- not the
+    customer who owns the return. No ownership check against actor.id is
+    performed here, since staff legitimately act on any customer's return.
 
     Creates the Refund in COMPLETED state and marks the Payment as
     REFUNDED. Raises HTTPException on the first rule that fails.
@@ -51,9 +59,6 @@ def process_refund(db: Session, current_user: Customer, return_id: uuid.UUID) ->
     ret = db.query(Return).filter(Return.id == return_id).first()
     if ret is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Return not found")
-
-    if ret.customer_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this return")
 
     if ret.status != ReturnStatus.COMPLETED:
         raise HTTPException(
@@ -101,7 +106,8 @@ def process_refund(db: Session, current_user: Customer, return_id: uuid.UUID) ->
                 "refund_id": str(refund.id),
                 "return_id": str(ret.id),
                 "payment_id": str(payment.id),
-                "customer_id": str(current_user.id),
+                "customer_id": str(ret.customer_id),
+                "processed_by_staff_id": str(actor.id),
                 "amount": str(refund.amount),
             },
         )

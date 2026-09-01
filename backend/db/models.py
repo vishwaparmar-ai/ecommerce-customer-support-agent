@@ -46,6 +46,10 @@ from sqlalchemy.dialects.postgresql import UUID,JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db.database import Base
 
+class CustomerRole(str, enum.Enum):
+    CUSTOMER = "customer"
+    SUPPORT_STAFF = "support_staff"
+    ADMIN = "admin"
 
 class ConversationStatus(str, enum.Enum):
     ACTIVE = "active"
