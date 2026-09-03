@@ -30,7 +30,7 @@ from backend.prompts.classifier_prompt_v1 import SYSTEM_PROMPT
 
 def _get_llm() -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
+        model="gemini-3.6-flash",
         google_api_key=settings.GEMINI_API_KEY,
         temperature=0,
     )

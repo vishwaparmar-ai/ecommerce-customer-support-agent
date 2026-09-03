@@ -198,3 +198,24 @@ def cancel_order(db: Session, current_user: Customer, order_id: uuid.UUID) -> Or
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel order",
         )
+
+def get_cancellable_orders(
+    db: Session,
+    customer_id: uuid.UUID,
+) -> list[Order]:
+    """
+    Return all orders belonging to the authenticated customer that are
+    currently eligible for cancellation.
+
+    This function is intentionally scoped by customer_id so the agent
+    can never see another customer's orders.
+    """
+    return (
+        db.query(Order)
+        .filter(
+            Order.customer_id == customer_id,
+            Order.status.in_(CANCELLABLE_STATES),
+        )
+        .order_by(Order.created_at.desc())
+        .all()
+    )

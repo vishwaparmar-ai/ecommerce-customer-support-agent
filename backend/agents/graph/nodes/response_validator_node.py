@@ -1,44 +1,34 @@
 """
 Graph node: response_validator.
 
-Final step every path routes through before END (per the doc's section 12
-workflow diagram). A plain function, not a factory -- it only inspects
-state, it doesn't need db/current_user, since it isn't calling any tool
-or service itself.
+Final validation layer before the response reaches the customer.
 
-What it actually checks (deliberately practical, not exhaustive):
-    1. The response isn't empty/whitespace -- a node returning nothing
-       usable shouldn't reach the customer silently.
-    2. The response isn't a raw leaked dict/error (a node forgot to
-       phrase a natural-language message and a tool result or exception
-       string leaked through as-is).
-    3. The response doesn't CLAIM a consequential action happened
-       ("your order has been cancelled", "your refund has been issued")
-       without a matching successful tool call actually being present in
-       state["tool_calls"] this turn. This is the most valuable check --
-       it catches the LLM hallucinating that it did something it didn't.
+The validator must be defensive because LLM message content can be either:
 
-On any failure, this REPLACES the last message with a safe fallback and
-sets escalated=True, rather than letting a bad response reach the
-customer. It does not raise -- a validator that crashes is worse than one
-that's occasionally overcautious.
+    str
+    list[dict]
+    list[str]
+    or another structured content representation.
+
+It must NEVER crash while validating a response.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from langchain_core.messages import AIMessage
 
 from backend.core.logging import logger
 from backend.agents.graph.state import AgentState
 
+
 SAFE_FALLBACK_MESSAGE = (
     "Something went wrong while preparing your response. "
     "I'm connecting you with a support agent to make sure this is handled correctly."
 )
 
-# Phrases that claim a consequential action was completed. Kept small and
-# specific rather than trying to catch every possible phrasing -- false
-# negatives here are safer than false positives that escalate everything.
+
 ACTION_CLAIM_PHRASES = [
     "has been cancelled",
     "order is cancelled",
@@ -48,57 +38,239 @@ ACTION_CLAIM_PHRASES = [
     "return request has been created",
 ]
 
-# Tool names whose successful execution would justify the corresponding
-# claim above. Kept as one combined set since any successful write this
-# turn is grounds for an action-claim to be plausible.
-WRITE_TOOL_NAMES = {"cancel_order", "create_return_request", "create_support_ticket", "escalate_to_human"}
+
+WRITE_TOOL_NAMES = {
+    "cancel_order",
+    "create_return_request",
+    "create_support_ticket",
+    "escalate_to_human",
+}
 
 
-def _tool_call_succeeded(tool_calls: list[dict]) -> bool:
-    """A tool call 'succeeded' if its result dict doesn't contain an error key."""
+def _extract_text_content(content: Any) -> str:
+    """
+    Safely convert LangChain message content into plain text.
+
+    LLM providers can return content as either:
+
+        "some text"
+
+    or:
+
+        [
+            {"type": "text", "text": "some text"}
+        ]
+
+    or:
+
+        [
+            "some text",
+            {"type": "text", "text": "more text"}
+        ]
+
+    The validator only needs the textual portion.
+    """
+
+    if content is None:
+        return ""
+
+    # ---------------------------------------------------------
+    # Normal string response
+    # ---------------------------------------------------------
+
+    if isinstance(content, str):
+        return content.strip()
+
+    # ---------------------------------------------------------
+    # Structured/list response
+    # ---------------------------------------------------------
+
+    if isinstance(content, list):
+
+        text_parts: list[str] = []
+
+        for item in content:
+
+            # Example:
+            # {"type": "text", "text": "Hello"}
+            if isinstance(item, dict):
+
+                text = item.get("text")
+
+                if isinstance(text, str):
+                    text_parts.append(text)
+
+                continue
+
+            # Example:
+            # ["Hello", "World"]
+            if isinstance(item, str):
+                text_parts.append(item)
+
+        return " ".join(text_parts).strip()
+
+    # ---------------------------------------------------------
+    # Unknown content type.
+    #
+    # Do NOT convert arbitrary objects/dicts to strings because
+    # that could make internal structured data look like a
+    # legitimate customer-facing response.
+    # ---------------------------------------------------------
+
+    return ""
+
+
+def _tool_call_succeeded(
+    tool_calls: list[dict],
+) -> bool:
+    """
+    Check whether a consequential write tool succeeded.
+    """
+
     for call in tool_calls:
-        if call.get("name") in WRITE_TOOL_NAMES:
-            result = call.get("result", {})
-            if isinstance(result, dict) and "error" not in result:
-                return True
+
+        if call.get("name") not in WRITE_TOOL_NAMES:
+            continue
+
+        result = call.get("result", {})
+
+        if isinstance(result, dict) and "error" not in result:
+            return True
+
     return False
 
 
-def response_validator_node(state: AgentState) -> dict:
+def response_validator_node(
+    state: AgentState,
+) -> dict:
+
     messages = state.get("messages", [])
+
+    # ---------------------------------------------------------
+    # No messages
+    # ---------------------------------------------------------
+
     if not messages:
-        logger.info("response_validator_no_messages", extra={"customer_id": state["customer_id"]})
-        return {"messages": [AIMessage(content=SAFE_FALLBACK_MESSAGE)], "escalated": True}
+
+        logger.info(
+            "response_validator_no_messages",
+            extra={
+                "customer_id": state["customer_id"],
+            },
+        )
+
+        return {
+            "messages": [
+                AIMessage(
+                    content=SAFE_FALLBACK_MESSAGE
+                )
+            ],
+            "escalated": True,
+        }
+
+    # ---------------------------------------------------------
+    # Extract response text safely
+    # ---------------------------------------------------------
 
     last_message = messages[-1]
-    content = (last_message.content or "").strip()
 
-    # Check 1: empty response.
+    content = _extract_text_content(
+        last_message.content
+    )
+
+    # ---------------------------------------------------------
+    # Check 1: Empty response
+    # ---------------------------------------------------------
+
     if not content:
-        logger.info("response_validator_empty_response", extra={"customer_id": state["customer_id"]})
-        return {"messages": [AIMessage(content=SAFE_FALLBACK_MESSAGE)], "escalated": True}
 
-    # Check 2: raw leaked dict/error.
-    if content.startswith("{") or "'error':" in content or '"error":' in content:
+        logger.info(
+            "response_validator_empty_response",
+            extra={
+                "customer_id": state["customer_id"],
+                "content_type": type(
+                    last_message.content
+                ).__name__,
+            },
+        )
+
+        return {
+            "messages": [
+                AIMessage(
+                    content=SAFE_FALLBACK_MESSAGE
+                )
+            ],
+            "escalated": True,
+        }
+
+    # ---------------------------------------------------------
+    # Check 2: Raw leaked data/error
+    # ---------------------------------------------------------
+
+    if (
+        content.startswith("{")
+        or "'error':" in content
+        or '"error":' in content
+    ):
+
         logger.info(
             "response_validator_leaked_raw_data",
-            extra={"customer_id": state["customer_id"], "content_preview": content[:100]},
+            extra={
+                "customer_id": state["customer_id"],
+                "content_preview": content[:100],
+            },
         )
-        return {"messages": [AIMessage(content=SAFE_FALLBACK_MESSAGE)], "escalated": True}
 
-    # Check 3: hallucinated action claim without a matching successful tool call.
+        return {
+            "messages": [
+                AIMessage(
+                    content=SAFE_FALLBACK_MESSAGE
+                )
+            ],
+            "escalated": True,
+        }
+
+    # ---------------------------------------------------------
+    # Check 3: Unverified consequential action
+    # ---------------------------------------------------------
+
     content_lower = content.lower()
-    claims_action = any(phrase in content_lower for phrase in ACTION_CLAIM_PHRASES)
-    if claims_action and not _tool_call_succeeded(state.get("tool_calls", [])):
+
+    claims_action = any(
+        phrase in content_lower
+        for phrase in ACTION_CLAIM_PHRASES
+    )
+
+    if claims_action and not _tool_call_succeeded(
+        state.get("tool_calls", [])
+    ):
+
         logger.info(
             "response_validator_unverified_action_claim",
             extra={
                 "customer_id": state["customer_id"],
                 "content_preview": content[:100],
-                "tool_calls": [t.get("name") for t in state.get("tool_calls", [])],
+                "tool_calls": [
+                    tool.get("name")
+                    for tool in state.get(
+                        "tool_calls",
+                        [],
+                    )
+                ],
             },
         )
-        return {"messages": [AIMessage(content=SAFE_FALLBACK_MESSAGE)], "escalated": True}
 
-    # All checks passed -- let the response through unchanged.
+        return {
+            "messages": [
+                AIMessage(
+                    content=SAFE_FALLBACK_MESSAGE
+                )
+            ],
+            "escalated": True,
+        }
+
+    # ---------------------------------------------------------
+    # Everything passed
+    # ---------------------------------------------------------
+
     return {}
