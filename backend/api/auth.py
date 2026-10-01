@@ -1,7 +1,7 @@
 from fastapi import APIRouter,HTTPException,status,Depends
 from sqlalchemy.orm import Session
 from backend.schemas.customer import CustomerCreate,CustomerLogin,CustomerResponse,Token
-from backend.db.dependency import get_db
+from backend.db.dependency import get_db, get_current_user
 from backend.db.models import Customer
 from backend.core.security import hash_password,verify_password,create_access_token
 
@@ -83,3 +83,10 @@ def login(
         "access_token": access_token,
         "token_type": "bearer"
     }
+
+
+@router.get("/me", response_model=CustomerResponse)
+def get_me(current_user: Customer = Depends(get_current_user)):
+    """Return the profile of the currently authenticated customer."""
+    return current_user
+

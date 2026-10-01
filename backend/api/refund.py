@@ -1,37 +1,17 @@
-"""
-Refund execution endpoint -- Phase 7 update.
+from __future__ import annotations
 
-AUTHORIZATION: this now requires SUPPORT_STAFF or ADMIN, closing the gap
-flagged when this endpoint was first built ("any customer who owns the
-return can trigger their own refund via this endpoint"). Refund execution
-is a staff/admin action -- customers can check eligibility via the
-check_refund_eligibility agent tool, but actually issuing one requires a
-human with staff/admin privileges to review and approve it first.
-
-Note this also changes the semantics slightly: `payload.return_id` is no
-longer implicitly the calling customer's own -- process_refund's ownership
-check (which compared ret.customer_id to current_user.id) needs revisiting
-too, since a staff member reviewing a customer's refund isn't the same
-customer. If refund_service.process_refund still checks
-ret.customer_id != current_user.id, that check needs to be dropped or
-changed now that current_user is staff, not the customer who owns the
-return.
-"""
-
-from uuid import UUID
-
+import uuid
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from backend.db.dependency import get_db, require_role
+from backend.db.dependency import get_db, get_current_user, require_role
 from backend.db.models import Customer, CustomerRole
-from backend.schemas.refunds import OrderRefund
-from backend.services.refund_service import process_refund
-
+from backend.schemas.refunds import OrderRefund, RefundResponse
+from backend.services.refund_service import get_refund_for_customer, process_refund
 
 router = APIRouter(
-    prefix="/refund",
-    tags=["Refund"],
+    prefix="/refunds",
+    tags=["Refunds"],
 )
 
 
@@ -41,6 +21,7 @@ def payment_refund(
     db: Session = Depends(get_db),
     current_staff: Customer = Depends(require_role(CustomerRole.SUPPORT_STAFF, CustomerRole.ADMIN)),
 ):
+    """Staff/Admin only: Process a refund for an approved completed return."""
     refund = process_refund(
         db=db,
         actor=current_staff,
@@ -49,7 +30,27 @@ def payment_refund(
 
     return {
         "message": "Refund processed successfully",
-        "refund_id": refund.id,
+        "refund_id": str(refund.id),
         "amount": str(refund.amount),
         "status": refund.status.value,
     }
+
+
+@router.get("/{refund_id}", response_model=RefundResponse)
+def get_refund_status(
+    refund_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: Customer = Depends(get_current_user),
+):
+    """Inspect refund status and details for an owned return or as staff/admin."""
+    refund = get_refund_for_customer(db=db, refund_id=refund_id, current_user=current_user)
+    return RefundResponse(
+        id=refund.id,
+        return_id=refund.return_id,
+        payment_id=refund.payment_id,
+        amount=refund.amount,
+        status=refund.status,
+        refund_reference=refund.refund_reference,
+        created_at=refund.created_at,
+        completed_at=refund.completed_at,
+    )

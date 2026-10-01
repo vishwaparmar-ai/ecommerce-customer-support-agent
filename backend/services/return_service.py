@@ -123,3 +123,23 @@ def create_return(db: Session, current_user: Customer, order_id: uuid.UUID, reas
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create return request",
         )
+
+
+def list_returns_for_customer(db: Session, customer_id: uuid.UUID) -> list[Return]:
+    """List all returns requested by the given customer, ordered by newest first."""
+    return (
+        db.query(Return)
+        .filter(Return.customer_id == customer_id)
+        .order_by(Return.requested_at.desc())
+        .all()
+    )
+
+
+def get_return_for_customer(db: Session, return_id: uuid.UUID, customer_id: uuid.UUID) -> Return:
+    """Fetch return details and enforce ownership. Raises 404 if missing, 403 if not owned."""
+    ret = db.query(Return).filter(Return.id == return_id).first()
+    if ret is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Return not found")
+    if ret.customer_id != customer_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this return")
+    return ret

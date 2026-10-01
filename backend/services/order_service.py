@@ -26,6 +26,7 @@ from backend.db.models import (
     PaymentMethod,
     PaymentStatus,
     Product,
+    Shipment,
 )
 
 # States from which an order can still be cancelled by the customer.
@@ -219,3 +220,50 @@ def get_cancellable_orders(
         .order_by(Order.created_at.desc())
         .all()
     )
+
+
+def list_orders_for_customer(
+    db: Session,
+    customer_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Order]:
+    """List orders belonging to customer, newest first."""
+    return (
+        db.query(Order)
+        .filter(Order.customer_id == customer_id)
+        .order_by(Order.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_order_payment(
+    db: Session,
+    order_id: uuid.UUID,
+    customer_id: uuid.UUID,
+) -> Payment:
+    """Fetch payment details for an owned order. Raises 404 if order or payment missing."""
+    order = get_order_for_customer(db, order_id, customer_id)
+    if order.payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment record not found for this order",
+        )
+    return order.payment
+
+
+def get_order_shipment(
+    db: Session,
+    order_id: uuid.UUID,
+    customer_id: uuid.UUID,
+) -> Shipment:
+    """Fetch shipment details for an owned order. Raises 404 if order or shipment missing."""
+    order = get_order_for_customer(db, order_id, customer_id)
+    if order.shipment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shipment record not found for this order",
+        )
+    return order.shipment

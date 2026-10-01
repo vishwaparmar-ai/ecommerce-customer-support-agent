@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 import logging
 from backend.db.models import (
     Customer,
+    CustomerRole,
     Order,
     SupportTicket,
     TicketPriority,
@@ -213,3 +214,39 @@ def assign_ticket(db: Session, ticket_id: uuid.UUID, assigned_to: str, changed_b
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to assign ticket",
         )
+
+
+def list_tickets_for_customer(
+    db: Session,
+    current_user: Customer,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[SupportTicket]:
+    """
+    List tickets. Customers only see tickets they created.
+    Support staff and admins can see all tickets across the system.
+    """
+    query = db.query(SupportTicket)
+    if current_user.role not in (CustomerRole.SUPPORT_STAFF, CustomerRole.ADMIN):
+        query = query.filter(SupportTicket.customer_id == current_user.id)
+    return query.order_by(SupportTicket.created_at.desc()).offset(offset).limit(limit).all()
+
+
+def get_ticket_for_customer(
+    db: Session,
+    ticket_id: uuid.UUID,
+    current_user: Customer,
+) -> SupportTicket:
+    """Fetch ticket details. Enforces ownership for customers, while staff/admin can view any."""
+    ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    if current_user.role not in (CustomerRole.SUPPORT_STAFF, CustomerRole.ADMIN):
+        if ticket.customer_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this ticket",
+            )
+
+    return ticket

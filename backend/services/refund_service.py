@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from backend.core.logging import logger
 from backend.db.models import (
     Customer,
+    CustomerRole,
     PaymentStatus,
     Refund,
     RefundStatus,
@@ -120,3 +121,16 @@ def process_refund(db: Session, actor: Customer, return_id: uuid.UUID) -> Refund
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process refund",
         )
+
+
+def get_refund_for_customer(db: Session, refund_id: uuid.UUID, current_user: Customer) -> Refund:
+    """Fetch refund details. Enforces ownership for customers, while staff/admin can view any."""
+    refund = db.query(Refund).filter(Refund.id == refund_id).first()
+    if refund is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Refund not found")
+
+    if current_user.role not in (CustomerRole.SUPPORT_STAFF, CustomerRole.ADMIN):
+        if refund.return_ is None or refund.return_.customer_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this refund")
+
+    return refund
